@@ -268,6 +268,15 @@ impl eframe::App for AppState {
     }
 }
 
+fn configure_context(ctx: &egui::Context) {
+    egui_extras::install_image_loaders(ctx);
+    fonts::configure(ctx);
+    ctx.global_style_mut(|style| {
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        style.spacing.button_padding = egui::vec2(10.0, 6.0);
+    });
+}
+
 pub fn run(path: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -279,12 +288,7 @@ pub fn run(path: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
         "Oculi",
         options,
         Box::new(move |cc| {
-            egui_extras::install_image_loaders(&cc.egui_ctx);
-            fonts::configure(&cc.egui_ctx);
-            cc.egui_ctx.global_style_mut(|s| {
-                s.spacing.item_spacing = egui::vec2(8.0, 6.0);
-                s.spacing.button_padding = egui::vec2(10.0, 6.0);
-            });
+            configure_context(&cc.egui_ctx);
             let mut state = AppState::default();
             if let Some(path) = path {
                 state.open(&path);
@@ -293,4 +297,65 @@ pub fn run(path: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
         }),
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_fields_do_not_expand_the_sidebar_over_successive_frames() {
+        for theme in [egui::Theme::Dark, egui::Theme::Light] {
+            for (screen, sidebar_width) in [
+                (egui::vec2(760.0, 480.0), 170.0),
+                (egui::vec2(1280.0, 800.0), 242.0),
+                (egui::vec2(1280.0, 800.0), 360.0),
+            ] {
+                let ctx = egui::Context::default();
+                configure_context(&ctx);
+                ctx.set_theme(theme);
+                let mut app = AppState::default();
+                app.open(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("build/counter.vcd"));
+                assert!(app.error.is_none());
+                for frame in 0..60 {
+                    let session = app.session.as_mut().unwrap();
+                    session.hierarchy_query =
+                        if (20..40).contains(&frame) { "td" } else { "" }.into();
+                    session.filter = if (20..40).contains(&frame) { "ct" } else { "" }.into();
+                    let mut output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, screen)),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let id = ui.make_persistent_id("browser");
+                            if frame == 0 {
+                                ctx.data_mut(|data| {
+                                    data.insert_persisted(
+                                        id,
+                                        egui::containers::panel::PanelState {
+                                            outer_rect: egui::Rect::from_min_size(
+                                                egui::Pos2::ZERO,
+                                                egui::vec2(sidebar_width, screen.y),
+                                            ),
+                                        },
+                                    );
+                                });
+                            }
+                            app.show(ui);
+                            let width = egui::containers::panel::PanelState::load(&ctx, id)
+                                .expect("browser panel state")
+                                .size()
+                                .x;
+                            assert!(
+                                (width - sidebar_width).abs() <= 1.0,
+                                "sidebar grew from {sidebar_width} to {width} on frame {frame} ({theme:?})"
+                            );
+                        },
+                    );
+                    output.textures_delta.clear();
+                }
+            }
+        }
+    }
 }

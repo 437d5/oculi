@@ -1,5 +1,6 @@
 //! Viewing state shared by the UI and its display-independent tests.
 pub mod format;
+pub mod hierarchy;
 pub mod ruler;
 pub mod segments;
 pub mod viewport;
@@ -14,6 +15,9 @@ pub struct Session {
     pub selected: Vec<usize>,
     pub scope: Vec<String>,
     pub filter: String,
+    pub signal_match: usize,
+    pub hierarchy_query: String,
+    pub hierarchy_match: usize,
     pub cursor: Option<u64>,
     pub viewport: Viewport,
     pub radix: Radix,
@@ -34,6 +38,7 @@ impl Session {
         if self.scope != scope {
             self.scope = scope;
             self.filter.clear();
+            self.signal_match = 0;
         }
     }
 
@@ -58,6 +63,9 @@ impl Session {
             selected,
             scope,
             filter: String::new(),
+            signal_match: 0,
+            hierarchy_query: String::new(),
+            hierarchy_match: 0,
             cursor: None,
             viewport,
             radix: Radix::Binary,
@@ -77,18 +85,16 @@ impl Session {
     }
 
     pub fn visible_signals(&self) -> Vec<usize> {
-        let filter = self.filter.to_lowercase();
-        self.trace
+        let candidates = self
+            .trace
             .signals
             .iter()
             .enumerate()
-            .filter(|(_, s)| {
-                s.path.split_last().is_some_and(|(name, scope)| {
-                    scope == self.scope && name.to_lowercase().contains(&filter)
-                })
-            })
-            .map(|(i, _)| i)
-            .collect()
+            .filter_map(|(index, signal)| {
+                let (name, scope) = signal.path.split_last()?;
+                (scope == self.scope).then_some((index, std::slice::from_ref(name)))
+            });
+        hierarchy::ranked(candidates, &self.filter)
     }
 
     /// Sorted distinct scope paths, including ancestors and the root.

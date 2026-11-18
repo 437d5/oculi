@@ -23,6 +23,15 @@ values, and waveforms on the right. Select a scope, filter its signals, and chec
 the ones to display. Alias names are independently selectable and share storage.
 Click scope names to select them; use the separate arrows to expand/collapse.
 Changing scopes clears the old filter so it cannot hide a different scope's signals.
+Use **Find scope…** above the hierarchy to fuzzy-match full scope paths: matching
+is case-insensitive and letters can be skipped (`td` finds `tb.dut`). Results are
+ranked, with exact scope names first. Use ↑/↓ and Enter, or click a result, to
+select its scope. **Clear** or Escape restores the tree.
+
+**Find signal…** uses the same fuzzy matching and ranking within the selected
+scope (`ct` finds `count[3:0]`). Use ↑/↓ to highlight a signal and Enter to toggle
+its waveform, or use its checkbox. **Clear** or Escape restores the scope's full
+signal list without removing displayed waveforms. The two searches are independent.
 
 - Click a waveform to place cursor A and inspect values.
 - Zoom in / Zoom out buttons navigate time. `+` (or `=`), `-`, and `F` zoom in,

@@ -56,6 +56,64 @@ fn selection_shares_histories_and_filters_by_scope() {
 }
 
 #[test]
+fn signal_search_matches_skipped_characters_only_in_the_selected_scope() {
+    let mut session = Session::new(sample());
+    session.select_scope(vec!["tb".into()]);
+    let selected = session.selected.clone();
+    session.hierarchy_query = "dut".into();
+    session.filter = "  DT  ".into();
+    assert_eq!(session.visible_signals(), [2], "DT should find data");
+    session.filter = "CK".into();
+    assert_eq!(session.visible_signals(), [1], "CK should find clk");
+    session.filter = "als".into();
+    assert!(
+        session.visible_signals().is_empty(),
+        "child scopes stay separate"
+    );
+    session.filter = "cc".into();
+    assert!(
+        session.visible_signals().is_empty(),
+        "cannot reuse a character"
+    );
+    session.filter = "   ".into();
+    assert_eq!(session.visible_signals(), [1, 2]);
+    assert_eq!(session.hierarchy_query, "dut");
+    assert_eq!(
+        session.selected, selected,
+        "searching must not alter waveforms"
+    );
+    session.signal_match = 1;
+    session.select_scope(vec!["tb".into(), "dut".into()]);
+    assert!(session.filter.is_empty());
+    assert_eq!(session.signal_match, 0);
+    assert_eq!(session.visible_signals(), [3]);
+}
+
+#[test]
+fn signal_search_ranks_exact_names_before_prefix_substring_and_fuzzy_matches() {
+    let trace = oculi::vcd::load(
+        &b"$scope module tb $end
+$var wire 1 ! tx_valid $end
+$var wire 1 ! tv $end
+$var wire 1 ! tv_ready $end
+$var wire 1 ! a_tv $end
+$scope module dut $end
+$var wire 1 ! tv $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+"[..],
+    )
+    .unwrap();
+    let mut session = Session::new(trace);
+    assert_eq!(session.visible_signals(), [0, 1, 2, 3]);
+    session.filter = "TV".into();
+    assert_eq!(session.visible_signals(), [1, 2, 3, 0]);
+    session.filter.clear();
+    assert_eq!(session.visible_signals(), [0, 1, 2, 3]);
+}
+
+#[test]
 fn initially_limits_selection_to_eight_unique_histories() {
     let mut input = String::new();
     for n in 0..10 {

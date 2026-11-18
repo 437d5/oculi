@@ -37,14 +37,25 @@ fn failed_open_preserves_old_session_and_success_resets_it() {
     let session = state.session.as_mut().unwrap();
     session.selected.clear();
     session.cursor = Some(10);
+    session.hierarchy_query = "dut".into();
+    session.hierarchy_match = 1;
+    session.filter = "ct".into();
+    session.signal_match = 1;
     state.open(&root.join("Cargo.toml"));
     assert!(state.error.is_some());
     assert!(state.session.as_ref().unwrap().selected.is_empty());
     assert_eq!(state.session.as_ref().unwrap().cursor, Some(10));
+    assert_eq!(state.session.as_ref().unwrap().hierarchy_query, "dut");
+    assert_eq!(state.session.as_ref().unwrap().filter, "ct");
+    assert_eq!(state.session.as_ref().unwrap().signal_match, 1);
     state.open(&root.join("examples/counter.vcd"));
     assert!(state.error.is_none());
     assert_eq!(state.session.as_ref().unwrap().cursor, None);
     assert!(!state.session.as_ref().unwrap().selected.is_empty());
+    assert!(state.session.as_ref().unwrap().hierarchy_query.is_empty());
+    assert_eq!(state.session.as_ref().unwrap().hierarchy_match, 0);
+    assert!(state.session.as_ref().unwrap().filter.is_empty());
+    assert_eq!(state.session.as_ref().unwrap().signal_match, 0);
 }
 
 #[test]
@@ -85,14 +96,19 @@ fn zoom_shortcuts_work_but_do_not_intercept_filter_typing() {
     frame(&mut app, key(egui::Key::Plus));
     frame(&mut app, key(egui::Key::F));
     assert_eq!(app.session.as_ref().unwrap().viewport.span(), 25);
-    ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("signal_filter")));
-    frame(&mut app, vec![]);
     frame(&mut app, key(egui::Key::Plus));
-    assert_eq!(
-        app.session.as_ref().unwrap().viewport.span(),
-        25,
-        "typing in a filter must not zoom"
-    );
+    for field in ["signal_filter", "hierarchy_search"] {
+        ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique(field)));
+        frame(&mut app, vec![]);
+        for shortcut in [egui::Key::Plus, egui::Key::Minus, egui::Key::F] {
+            frame(&mut app, key(shortcut));
+            assert_eq!(
+                app.session.as_ref().unwrap().viewport.span(),
+                13,
+                "typing in {field} must not change time navigation"
+            );
+        }
+    }
 }
 
 #[test]
