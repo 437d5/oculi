@@ -394,6 +394,9 @@ fn navigation(
 }
 
 fn scalar(p: &Painter, r: Rect, bit: Logic, previous: Option<Logic>, c: &Colors) {
+    if bit == Logic::One {
+        p.rect_filled(r, 0.0, c.wave.gamma_multiply(0.15));
+    }
     let y = match bit {
         Logic::Zero => r.bottom(),
         Logic::One => r.top(),
