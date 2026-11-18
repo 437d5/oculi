@@ -43,6 +43,12 @@ signal list without removing displayed waveforms. The two searches are independe
   the displayed signals. Right-click a name for Move up / Move down. Releasing
   a dragged handle outside the name rows leaves the order unchanged.
 - Choose Binary or Hex for buses; hover truncated values for full text.
+- Click **+** beside a displayed bus name to expand it into individual bit
+  waveforms, or right-click its name and choose **Expand bits**. The bus summary
+  stays above its bits; click **−** to collapse them. Each bit has its
+  own cursor value, high-state shading, and X/Z display. Bit names follow the VCD
+  declaration, including ascending or offset ranges; a bus without a declared
+  range uses width-1 through zero. Dragging the bus handle moves its bits with it.
 - Light theme / Dark theme changes appearance; the initial theme follows the system.
 - A failed Open VCD preserves the previous trace. Cancelling the file dialog does nothing.
 

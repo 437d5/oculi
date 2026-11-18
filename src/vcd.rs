@@ -236,6 +236,19 @@ fn declarations(
                         var.reference
                     )));
                 }
+                let bit_range = match var.index {
+                    Some(::vcd::ReferenceIndex::Range(left, right)) => {
+                        let range_width = (i64::from(left) - i64::from(right)).unsigned_abs() + 1;
+                        if range_width != u64::from(var.size) {
+                            return Err(LoadError::invalid(format!(
+                                "range [{left}:{right}] for {} disagrees with width {}",
+                                var.reference, var.size
+                            )));
+                        }
+                        Some((left, right))
+                    }
+                    _ => None,
+                };
                 let binding = if let Some(existing) = bindings.get(&var.code) {
                     if existing.width != var.size {
                         return Err(LoadError::invalid(format!(
@@ -262,6 +275,7 @@ fn declarations(
                 trace.signals.push(Signal {
                     path: signal_path,
                     width: var.size,
+                    bit_range,
                     history: binding.history,
                 });
             }

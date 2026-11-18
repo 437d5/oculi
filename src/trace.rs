@@ -55,8 +55,30 @@ pub struct Signal {
     /// Separate scope/name components preserve escaped names containing dots.
     pub path: Vec<String>,
     pub width: u32,
+    /// Declared left/right bit indices; None uses width-1 down to zero.
+    pub bit_range: Option<(i32, i32)>,
     /// Index into the owning trace's histories.
     pub history: usize,
+}
+
+impl Signal {
+    /// Label a recorded bit position, where position zero is the leftmost bit.
+    pub fn bit_name(&self, position: usize) -> Option<String> {
+        let position = i64::try_from(position).ok()?;
+        if position >= i64::from(self.width) {
+            return None;
+        }
+        let label = self.path.join(".");
+        let (base, index) = if let Some((left, right)) = self.bit_range {
+            let suffix = format!("[{left}:{right}]");
+            let base = label.strip_suffix(&suffix).unwrap_or(&label);
+            let index = i64::from(left) + if left <= right { position } else { -position };
+            (base, index)
+        } else {
+            (label.as_str(), i64::from(self.width) - 1 - position)
+        };
+        Some(format!("{base}[{index}]"))
+    }
 }
 
 /// Time units used by trace formats, independent of a parser library.
@@ -136,11 +158,13 @@ mod tests {
                 Signal {
                     path: vec!["tb".into(), "clk".into()],
                     width: 1,
+                    bit_range: None,
                     history: 0,
                 },
                 Signal {
                     path: vec!["tb".into(), "dut".into(), "clk".into()],
                     width: 1,
+                    bit_range: None,
                     history: 0,
                 },
             ],

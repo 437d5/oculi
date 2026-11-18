@@ -69,6 +69,18 @@ bz \"
 }
 
 #[test]
+fn rejects_bus_ranges_that_disagree_with_the_recorded_width() {
+    for range in ["[7:0]", "[0:7]", "[-1:-8]", "[0:0]"] {
+        let input = format!("$var wire 4 ! data {range} $end\n$enddefinitions $end\n");
+        let error = load(input.as_bytes()).unwrap_err().to_string();
+        assert!(
+            error.contains("range") && error.contains("width"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn normalizes_short_vectors_before_comparing_values() {
     let input = trace("b1 !\n#1\nb0001 !\n#2\nbx !\n#3\nbxxxx !\n#4\nbz !\n", 4);
     let result = load(input.as_bytes()).unwrap();

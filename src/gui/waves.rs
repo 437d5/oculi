@@ -123,205 +123,297 @@ pub fn show(ui: &mut egui::Ui, session: &mut Session) {
         ui.weak("Select signals in the left sidebar to display their waveforms.");
     }
     let mut move_row = None;
+    let mut toggle_bus = None;
     let row_count = session.selected.len();
-    egui::ScrollArea::vertical()
-        .id_salt("wave_rows")
-        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            // Indices are tiny; histories and bit values are always borrowed.
-            for (position, index) in session.selected.clone().into_iter().enumerate() {
-                let (row, _) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), ROW_HEIGHT),
-                    Sense::hover(),
-                );
-                let area =
-                    Rect::from_min_max(Pos2::new(row.left() + names_width, row.top()), row.max);
-                let painter = ui.painter_at(row);
-                let signal = &session.trace.signals[index];
-                let history = &session.trace.histories[signal.history];
-                painter.line_segment(
-                    [row.left_bottom(), row.right_bottom()],
-                    Stroke::new(1.0, colors.grid),
-                );
-                painter.line_segment(
-                    [area.left_top(), area.left_bottom()],
-                    Stroke::new(1.0, colors.grid),
-                );
-                let name_rect =
-                    Rect::from_min_max(row.min, Pos2::new(area.left() - 80.0, row.bottom()));
-                let label = signal.path.join(".");
-                painter.with_clip_rect(name_rect).text(
-                    name_rect.left_center() + egui::vec2(34.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    &label,
-                    FontId::monospace(14.0),
-                    colors.text,
-                );
-                let label_response = ui
-                    .interact(
-                        name_rect,
-                        ui.scope_id().with(("label", index)),
-                        Sense::click(),
-                    )
-                    .on_hover_text(&label);
-                label_response.context_menu(|ui| {
-                    if ui
-                        .add_enabled(position > 0, egui::Button::new("Move up"))
-                        .clicked()
-                    {
-                        move_row = Some((position, position - 1));
-                        ui.close();
-                    }
-                    if ui
-                        .add_enabled(position + 1 < row_count, egui::Button::new("Move down"))
-                        .clicked()
-                    {
-                        move_row = Some((position, position + 1));
-                        ui.close();
-                    }
-                });
-                if let Some(payload) = label_response.dnd_hover_payload::<RowDrag>()
-                    && payload.signal != index
-                    && let Some(from) = session.selected.iter().position(|&i| i == payload.signal)
-                {
-                    painter.line_segment(
-                        insertion_marker(name_rect, from, position),
-                        Stroke::new(2.0, colors.wave),
+    let rows = session.wave_rows();
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        egui::ScrollArea::vertical()
+            .id_salt("wave_rows")
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .auto_shrink([false, false])
+            .show_rows(ui, ROW_HEIGHT, rows.len(), |ui, visible| {
+                // Indices are tiny; histories and bit values are always borrowed.
+                for wave in rows[visible].iter().copied() {
+                    let index = wave.signal;
+                    let position = session.selected.iter().position(|&i| i == index).unwrap();
+                    let (row, _) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), ROW_HEIGHT),
+                        Sense::hover(),
                     );
-                }
-                if let Some(payload) = label_response.dnd_release_payload::<RowDrag>()
-                    && let Some(from) = session.selected.iter().position(|&i| i == payload.signal)
-                {
-                    move_row = Some((from, position));
-                }
-                let handle_rect = Rect::from_center_size(
-                    Pos2::new(row.left() + 18.0, row.center().y),
-                    egui::vec2(24.0, ROW_HEIGHT - 12.0),
-                );
-                let handle = ui
-                    .interact(
-                        handle_rect,
-                        ui.scope_id().with(("row_handle", index)),
-                        Sense::drag(),
-                    )
-                    .on_hover_cursor(egui::CursorIcon::Grab)
-                    .on_hover_text("Drag to reorder signal");
-                handle.dnd_set_drag_payload(RowDrag { signal: index });
-                for dx in [-2.5, 2.5] {
-                    for dy in [-5.0, 0.0, 5.0] {
-                        painter.circle_filled(
-                            handle_rect.center() + egui::vec2(dx, dy),
-                            1.0,
-                            colors.muted,
+                    let area =
+                        Rect::from_min_max(Pos2::new(row.left() + names_width, row.top()), row.max);
+                    let painter = ui.painter_at(row);
+                    let signal = &session.trace.signals[index];
+                    let history = &session.trace.histories[signal.history];
+                    painter.line_segment(
+                        [row.left_bottom(), row.right_bottom()],
+                        Stroke::new(1.0, colors.grid),
+                    );
+                    painter.line_segment(
+                        [area.left_top(), area.left_bottom()],
+                        Stroke::new(1.0, colors.grid),
+                    );
+                    let name_rect =
+                        Rect::from_min_max(row.min, Pos2::new(area.left() - 80.0, row.bottom()));
+                    let label = wave.label(&session.trace);
+                    let is_bus = wave.bit.is_none() && signal.width > 1;
+                    let label_indent = if wave.bit.is_some() {
+                        52.0
+                    } else if is_bus {
+                        56.0
+                    } else {
+                        34.0
+                    };
+                    painter.with_clip_rect(name_rect).text(
+                        name_rect.left_center() + egui::vec2(label_indent, 0.0),
+                        Align2::LEFT_CENTER,
+                        &label,
+                        FontId::monospace(14.0),
+                        colors.text,
+                    );
+                    let label_response = ui
+                        .interact(
+                            name_rect,
+                            ui.scope_id().with(("label", wave)),
+                            Sense::click(),
+                        )
+                        .on_hover_text(&label);
+                    if wave.bit.is_none() {
+                        label_response.context_menu(|ui| {
+                            if is_bus {
+                                if ui
+                                    .button(if session.is_bus_expanded(index) {
+                                        "Collapse bits"
+                                    } else {
+                                        "Expand bits"
+                                    })
+                                    .clicked()
+                                {
+                                    toggle_bus = Some(index);
+                                    ui.close();
+                                }
+                                ui.separator();
+                            }
+                            if ui
+                                .add_enabled(position > 0, egui::Button::new("Move up"))
+                                .clicked()
+                            {
+                                move_row = Some((position, position - 1));
+                                ui.close();
+                            }
+                            if ui
+                                .add_enabled(
+                                    position + 1 < row_count,
+                                    egui::Button::new("Move down"),
+                                )
+                                .clicked()
+                            {
+                                move_row = Some((position, position + 1));
+                                ui.close();
+                            }
+                        });
+                    }
+                    if let Some(payload) = label_response.dnd_hover_payload::<RowDrag>()
+                        && payload.signal != index
+                        && let Some(from) =
+                            session.selected.iter().position(|&i| i == payload.signal)
+                    {
+                        let child_offset = wave.bit.map_or(0, |bit| bit + 1) as f32;
+                        let group_rows = if session.is_bus_expanded(index) {
+                            signal.width as f32 + 1.0
+                        } else {
+                            1.0
+                        };
+                        let group_rect = Rect::from_min_size(
+                            name_rect.min - egui::vec2(0.0, child_offset * ROW_HEIGHT),
+                            egui::vec2(name_rect.width(), group_rows * ROW_HEIGHT),
+                        );
+                        ui.painter().line_segment(
+                            insertion_marker(group_rect, from, position),
+                            Stroke::new(2.0, colors.wave),
                         );
                     }
-                }
-                let value = session.cursor.and_then(|time| history.value_at(time));
-                let full = value
-                    .map(|v| format_value(v, session.radix))
-                    .unwrap_or_else(|| "—".into());
-                let short = if full.len() > 8 {
-                    format!("{}…", &full[..7])
-                } else {
-                    full.clone()
-                };
-                painter.text(
-                    Pos2::new(area.left() - 12.0, row.center().y),
-                    Align2::RIGHT_CENTER,
-                    short,
-                    FontId::monospace(14.0),
-                    colors.cursor,
-                );
-                let value_rect = Rect::from_min_max(
-                    Pos2::new(area.left() - 78.0, row.top()),
-                    Pos2::new(area.left(), row.bottom()),
-                );
-                ui.interact(
-                    value_rect,
-                    ui.scope_id().with(("value", index)),
-                    Sense::hover(),
-                )
-                .on_hover_text(full);
-                let canvas = painter.with_clip_rect(area.shrink2(egui::vec2(0.0, 1.0)));
-                for &tick in &ticks {
-                    let x = area.left() + area.width() * session.viewport.fraction_at(tick) as f32;
-                    canvas.line_segment(
-                        [Pos2::new(x, area.top()), Pos2::new(x, area.bottom())],
-                        Stroke::new(0.5, colors.grid),
-                    );
-                }
-                let end = session.viewport.end.min(session.trace.end_time);
-                for segment in segments::visible(history, session.viewport.start, end) {
-                    let left = area.left()
-                        + area.width() * session.viewport.fraction_at(segment.start) as f32;
-                    let right = area.left()
-                        + area.width() * session.viewport.fraction_at(segment.end) as f32;
-                    let piece = Rect::from_min_max(
-                        Pos2::new(left, area.top() + 17.0),
-                        Pos2::new(right, area.bottom() - 17.0),
-                    );
-                    match segment.value {
-                        Some(bits) if bits.len() == 1 => {
-                            let previous = segment
-                                .start
-                                .checked_sub(1)
-                                .and_then(|time| history.value_at(time))
-                                .and_then(|value| value.first())
-                                .copied();
-                            scalar(&canvas, piece, bits[0], previous, &colors);
-                        }
-                        Some(bits) => {
-                            let text = format_value(bits, session.radix);
-                            bus(&canvas, piece, &text, &colors);
-                            ui.interact(
-                                piece,
-                                ui.scope_id().with(("bus", index, segment.start)),
-                                Sense::hover(),
+                    if let Some(payload) = label_response.dnd_release_payload::<RowDrag>()
+                        && let Some(from) =
+                            session.selected.iter().position(|&i| i == payload.signal)
+                    {
+                        move_row = Some((from, position));
+                    }
+                    if wave.bit.is_none() {
+                        let handle_rect = Rect::from_center_size(
+                            Pos2::new(row.left() + 18.0, row.center().y),
+                            egui::vec2(24.0, ROW_HEIGHT - 12.0),
+                        );
+                        let handle = ui
+                            .interact(
+                                handle_rect,
+                                ui.scope_id().with(("row_handle", index)),
+                                Sense::drag(),
                             )
-                            .on_hover_text(text);
-                        }
-                        None => {
-                            canvas.line_segment(
-                                [piece.left_center(), piece.right_center()],
-                                Stroke::new(1.0, colors.muted),
-                            );
-                            if piece.width() > 90.0 {
-                                canvas.text(
-                                    piece.center(),
-                                    Align2::CENTER_CENTER,
-                                    "unavailable",
-                                    FontId::monospace(12.0),
+                            .on_hover_cursor(egui::CursorIcon::Grab)
+                            .on_hover_text("Drag to reorder signal");
+                        handle.dnd_set_drag_payload(RowDrag { signal: index });
+                        for dx in [-2.5, 2.5] {
+                            for dy in [-5.0, 0.0, 5.0] {
+                                painter.circle_filled(
+                                    handle_rect.center() + egui::vec2(dx, dy),
+                                    1.0,
                                     colors.muted,
                                 );
                             }
                         }
                     }
-                }
-                if session.trace.end_time == 0 {
-                    canvas.text(
-                        area.center(),
-                        Align2::CENTER_CENTER,
-                        "No recorded duration",
-                        FontId::proportional(12.0),
-                        colors.muted,
+                    if is_bus {
+                        let expanded = session.is_bus_expanded(index);
+                        let expand_rect = Rect::from_center_size(
+                            Pos2::new(row.left() + 42.0, row.center().y),
+                            egui::vec2(18.0, 18.0),
+                        );
+                        let expand = ui
+                            .interact(
+                                expand_rect,
+                                ui.scope_id().with(("bus_expand", index)),
+                                Sense::click(),
+                            )
+                            .on_hover_text(if expanded {
+                                "Collapse bus bits"
+                            } else {
+                                "Expand bus into bits"
+                            });
+                        let visuals = ui.style().interact(&expand);
+                        let icon = expand_rect.shrink(2.0);
+                        let stroke = Stroke::new(1.2, visuals.fg_stroke.color);
+                        painter.rect(icon, 2.0, visuals.bg_fill, stroke, egui::StrokeKind::Inside);
+                        let center = icon.center();
+                        painter.line_segment(
+                            [center - egui::vec2(3.5, 0.0), center + egui::vec2(3.5, 0.0)],
+                            stroke,
+                        );
+                        if !expanded {
+                            painter.line_segment(
+                                [center - egui::vec2(0.0, 3.5), center + egui::vec2(0.0, 3.5)],
+                                stroke,
+                            );
+                        }
+                        if expand.clicked() {
+                            toggle_bus = Some(index);
+                        }
+                    }
+                    let value = session
+                        .cursor
+                        .and_then(|time| history.value_at(time))
+                        .and_then(|value| wave.project(value));
+                    let full = value
+                        .map(|v| format_value(v, session.radix))
+                        .unwrap_or_else(|| "—".into());
+                    let short = if full.len() > 8 {
+                        format!("{}…", &full[..7])
+                    } else {
+                        full.clone()
+                    };
+                    painter.text(
+                        Pos2::new(area.left() - 12.0, row.center().y),
+                        Align2::RIGHT_CENTER,
+                        short,
+                        FontId::monospace(14.0),
+                        colors.cursor,
                     );
-                }
-                if let Some(time) = session.cursor
-                    && time >= session.viewport.start
-                    && time <= session.viewport.end
-                {
-                    let x = area.left() + area.width() * session.viewport.fraction_at(time) as f32;
-                    canvas.line_segment(
-                        [Pos2::new(x, area.top()), Pos2::new(x, area.bottom())],
-                        Stroke::new(1.0, colors.cursor),
+                    let value_rect = Rect::from_min_max(
+                        Pos2::new(area.left() - 78.0, row.top()),
+                        Pos2::new(area.left(), row.bottom()),
                     );
+                    ui.interact(
+                        value_rect,
+                        ui.scope_id().with(("value", wave)),
+                        Sense::hover(),
+                    )
+                    .on_hover_text(full);
+                    let canvas = painter.with_clip_rect(area.shrink2(egui::vec2(0.0, 1.0)));
+                    for &tick in &ticks {
+                        let x =
+                            area.left() + area.width() * session.viewport.fraction_at(tick) as f32;
+                        canvas.line_segment(
+                            [Pos2::new(x, area.top()), Pos2::new(x, area.bottom())],
+                            Stroke::new(0.5, colors.grid),
+                        );
+                    }
+                    let end = session.viewport.end.min(session.trace.end_time);
+                    for segment in segments::visible(history, session.viewport.start, end) {
+                        let left = area.left()
+                            + area.width() * session.viewport.fraction_at(segment.start) as f32;
+                        let right = area.left()
+                            + area.width() * session.viewport.fraction_at(segment.end) as f32;
+                        let piece = Rect::from_min_max(
+                            Pos2::new(left, area.top() + 17.0),
+                            Pos2::new(right, area.bottom() - 17.0),
+                        );
+                        match segment.value.and_then(|value| wave.project(value)) {
+                            Some(bits) if bits.len() == 1 => {
+                                let previous = segment
+                                    .start
+                                    .checked_sub(1)
+                                    .and_then(|time| history.value_at(time))
+                                    .and_then(|value| wave.project(value))
+                                    .and_then(|value| value.first())
+                                    .copied();
+                                scalar(&canvas, piece, bits[0], previous, &colors);
+                            }
+                            Some(bits) => {
+                                let text = format_value(bits, session.radix);
+                                bus(&canvas, piece, &text, &colors);
+                                ui.interact(
+                                    piece,
+                                    ui.scope_id().with(("bus", index, segment.start)),
+                                    Sense::hover(),
+                                )
+                                .on_hover_text(text);
+                            }
+                            None => {
+                                canvas.line_segment(
+                                    [piece.left_center(), piece.right_center()],
+                                    Stroke::new(1.0, colors.muted),
+                                );
+                                if piece.width() > 90.0 {
+                                    canvas.text(
+                                        piece.center(),
+                                        Align2::CENTER_CENTER,
+                                        "unavailable",
+                                        FontId::monospace(12.0),
+                                        colors.muted,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    if session.trace.end_time == 0 {
+                        canvas.text(
+                            area.center(),
+                            Align2::CENTER_CENTER,
+                            "No recorded duration",
+                            FontId::proportional(12.0),
+                            colors.muted,
+                        );
+                    }
+                    if let Some(time) = session.cursor
+                        && time >= session.viewport.start
+                        && time <= session.viewport.end
+                    {
+                        let x =
+                            area.left() + area.width() * session.viewport.fraction_at(time) as f32;
+                        canvas.line_segment(
+                            [Pos2::new(x, area.top()), Pos2::new(x, area.bottom())],
+                            Stroke::new(1.0, colors.cursor),
+                        );
+                    }
                 }
-            }
-        });
+            });
+    });
     if let Some((from, to)) = move_row {
         session.move_selected(from, to);
+    }
+    if let Some(index) = toggle_bus {
+        session.set_bus_expanded(index, !session.is_bus_expanded(index));
     }
 }
 
@@ -468,6 +560,258 @@ mod tests {
     use super::*;
 
     #[test]
+    fn bus_toggle_expands_scalar_bit_rows_and_collapses_without_changing_selection() {
+        let context = egui::Context::default();
+        super::super::configure_context(&context);
+        let mut session = Session::new(
+            crate::vcd::load(&include_bytes!("../../examples/counter.vcd")[..]).unwrap(),
+        );
+        session.cursor = Some(15);
+        let selected = session.selected.clone();
+        let viewport = session.viewport;
+        let histories = session.trace.histories.len();
+        assert!(!frame(&context, &mut session, vec![]).contains(&"tb.count[3]".into()));
+        let arrow = Pos2::new(42.0, 138.0);
+        for pressed in [true, false] {
+            frame(
+                &context,
+                &mut session,
+                vec![
+                    egui::Event::PointerMoved(arrow),
+                    egui::Event::PointerButton {
+                        pos: arrow,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        let labels = frame(&context, &mut session, vec![]);
+        for name in [
+            "tb.count[3:0]",
+            "tb.count[3]",
+            "tb.count[2]",
+            "tb.count[1]",
+            "tb.count[0]",
+        ] {
+            assert!(labels.iter().any(|label| label == name), "missing {name}");
+        }
+        for pressed in [true, false] {
+            frame(
+                &context,
+                &mut session,
+                vec![egui::Event::PointerButton {
+                    pos: arrow,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        let labels = frame(&context, &mut session, vec![]);
+        assert!(labels.contains(&"tb.count[3:0]".into()));
+        assert!(!labels.contains(&"tb.count[3]".into()));
+        assert_eq!(session.selected, selected);
+        assert_eq!(session.viewport, viewport);
+        assert_eq!(session.cursor, Some(15));
+        assert_eq!(session.trace.histories.len(), histories);
+    }
+
+    #[test]
+    fn expanded_bits_render_their_own_cursor_values_and_only_real_transitions() {
+        let context = egui::Context::default();
+        super::super::configure_context(&context);
+        let trace = crate::vcd::load(
+            &b"$var wire 4 ! data [3:0] $end\n$enddefinitions $end\n\
+              #5\nb10xz !\n#10\nb11xz !\n#20\n"[..],
+        )
+        .unwrap();
+        let mut session = Session::new(trace);
+        session.set_bus_expanded(0, true);
+        session.cursor = Some(5);
+        let mut wave_color = Color32::TRANSPARENT;
+        let mut cursor_color = Color32::TRANSPARENT;
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280.0, 800.0))),
+                ..Default::default()
+            },
+            |ui| {
+                let colors = Colors::new(ui);
+                wave_color = colors.wave;
+                cursor_color = colors.cursor;
+                show(ui, &mut session);
+            },
+        );
+        let values: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.fallback_color == cursor_color => {
+                    Some(text.galley.text())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(values, ["10XZ", "1", "0", "X", "Z"]);
+        let edges = |top, bottom| {
+            output
+                .shapes
+                .iter()
+                .filter(|shape| match &shape.shape {
+                    egui::Shape::LineSegment { points, stroke } => {
+                        stroke.color == wave_color
+                            && points[0].x == points[1].x
+                            && points[0].y != points[1].y
+                            && points.iter().all(|point| point.y > top && point.y < bottom)
+                    }
+                    _ => false,
+                })
+                .count()
+        };
+        assert_eq!(
+            edges(106.0, 170.0),
+            0,
+            "an unchanged high bit must not acquire its neighbour's edge"
+        );
+        assert_eq!(
+            edges(170.0, 234.0),
+            1,
+            "the changing bit must have its own edge"
+        );
+        assert!(
+            output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Rect(rect) if rect.fill == wave_color.gamma_multiply(0.15)
+                    && rect.rect.center().y > 106.0 && rect.rect.center().y < 170.0
+            )),
+            "high bit rows must retain their shading"
+        );
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn wide_expanded_buses_virtualize_and_scroll_to_the_last_bit() {
+        let context = egui::Context::default();
+        super::super::configure_context(&context);
+        let trace = crate::vcd::load(
+            &b"$var wire 132 ! wide [131:0] $end\n$enddefinitions $end\nb1 !\n#10\n"[..],
+        )
+        .unwrap();
+        let mut session = Session::new(trace);
+        session.set_bus_expanded(0, true);
+        let viewport = session.viewport;
+        let labels = frame(&context, &mut session, vec![]);
+        assert!(labels.contains(&"wide[131]".into()));
+        assert!(!labels.contains(&"wide[0]".into()));
+        assert!(
+            labels
+                .iter()
+                .filter(|label| label.starts_with("wide["))
+                .count()
+                < 20
+        );
+        let pointer = Pos2::new(80.0, 200.0);
+        frame(
+            &context,
+            &mut session,
+            vec![egui::Event::PointerMoved(pointer)],
+        );
+        frame(
+            &context,
+            &mut session,
+            vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                phase: egui::TouchPhase::Move,
+                source: egui::MouseWheelSource::Unknown,
+                delta: egui::vec2(0.0, -16000.0),
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        for _ in 0..60 {
+            frame(&context, &mut session, vec![]);
+        }
+        assert!(frame(&context, &mut session, vec![]).contains(&"wide[0]".into()));
+        assert_eq!(
+            session.viewport, viewport,
+            "scrolling names must not change the time range"
+        );
+    }
+
+    #[test]
+    fn drag_preview_and_drop_keep_expanded_bus_children_together() {
+        let context = egui::Context::default();
+        super::super::configure_context(&context);
+        let mut session = Session::new(
+            crate::vcd::load(&include_bytes!("../../examples/counter.vcd")[..]).unwrap(),
+        );
+        session.set_bus_expanded(1, true);
+        frame(&context, &mut session, vec![]);
+        let from = Pos2::new(18.0, 75.0);
+        let target = Pos2::new(75.0, 138.0);
+        frame(
+            &context,
+            &mut session,
+            vec![
+                egui::Event::PointerMoved(from),
+                egui::Event::PointerButton {
+                    pos: from,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        let mut wave_color = Color32::TRANSPARENT;
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280.0, 800.0))),
+                events: vec![egui::Event::PointerMoved(target)],
+                ..Default::default()
+            },
+            |ui| {
+                wave_color = Colors::new(ui).wave;
+                show(ui, &mut session);
+            },
+        );
+        let group_bottom = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "tb.count[0]" => {
+                    Some(text.pos.y + text.galley.size().y / 2.0 + 32.0)
+                }
+                _ => None,
+            })
+            .expect("last child must be rendered");
+        assert!(
+            output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::LineSegment { points, stroke }
+                    if stroke.width == 2.0 && stroke.color == wave_color
+                    && (points[0].y - group_bottom).abs() < 1.0
+                    && (points[1].y - group_bottom).abs() < 1.0
+                && points.iter().all(|point| shape.clip_rect.contains(*point))
+            )),
+            "the drop line must appear after the bus AND its four children"
+        );
+        output.textures_delta.clear();
+        frame(
+            &context,
+            &mut session,
+            vec![egui::Event::PointerButton {
+                pos: target,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert_eq!(session.selected, [1, 0]);
+        let rows = session.wave_rows();
+        assert_eq!(rows.last().unwrap().signal, 0);
+        assert!(rows[..5].iter().all(|row| row.signal == 1));
+    }
+
+    #[test]
     fn insertion_marker_matches_the_result_of_reordering() {
         let row = Rect::from_min_max(Pos2::new(0.0, 64.0), Pos2::new(250.0, 128.0));
         assert_eq!(
@@ -609,14 +953,27 @@ mod tests {
         );
     }
 
-    fn frame(context: &egui::Context, session: &mut Session, events: Vec<egui::Event>) {
+    fn frame(
+        context: &egui::Context,
+        session: &mut Session,
+        events: Vec<egui::Event>,
+    ) -> Vec<String> {
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280.0, 800.0))),
             events,
             ..Default::default()
         };
         let mut output = context.run_ui(input, |ui| show(ui, session));
+        let labels = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
         output.textures_delta.clear();
+        labels
     }
 
     #[test]

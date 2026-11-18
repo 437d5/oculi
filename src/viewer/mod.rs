@@ -1,6 +1,7 @@
 //! Viewing state shared by the UI and its display-independent tests.
 pub mod format;
 pub mod hierarchy;
+pub mod rows;
 pub mod ruler;
 pub mod segments;
 pub mod viewport;
@@ -21,6 +22,7 @@ pub struct Session {
     pub cursor: Option<u64>,
     pub viewport: Viewport,
     pub radix: Radix,
+    expanded_buses: std::collections::HashSet<usize>,
 }
 
 impl Session {
@@ -69,6 +71,7 @@ impl Session {
             cursor: None,
             viewport,
             radix: Radix::Binary,
+            expanded_buses: std::collections::HashSet::new(),
         }
     }
 
@@ -81,7 +84,47 @@ impl Session {
         }
         if !selected {
             self.selected.retain(|&i| i != index);
+            self.expanded_buses.remove(&index);
         }
+    }
+
+    pub fn is_bus_expanded(&self, index: usize) -> bool {
+        self.expanded_buses.contains(&index)
+    }
+
+    pub fn set_bus_expanded(&mut self, index: usize, expanded: bool) {
+        if !expanded {
+            self.expanded_buses.remove(&index);
+        } else if self.selected.contains(&index)
+            && self
+                .trace
+                .signals
+                .get(index)
+                .is_some_and(|signal| signal.width > 1)
+        {
+            self.expanded_buses.insert(index);
+        }
+    }
+
+    /// Expanded buses keep their summary row and move together with their bit rows.
+    pub fn wave_rows(&self) -> Vec<rows::WaveRow> {
+        let mut rows = Vec::new();
+        for &index in &self.selected {
+            let Some(signal) = self.trace.signals.get(index) else {
+                continue;
+            };
+            rows.push(rows::WaveRow {
+                signal: index,
+                bit: None,
+            });
+            if self.is_bus_expanded(index) {
+                rows.extend((0..signal.width as usize).map(|position| rows::WaveRow {
+                    signal: index,
+                    bit: Some(position),
+                }));
+            }
+        }
+        rows
     }
 
     pub fn visible_signals(&self) -> Vec<usize> {

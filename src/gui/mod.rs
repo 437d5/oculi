@@ -317,6 +317,10 @@ mod tests {
                 let mut app = AppState::default();
                 app.open(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("build/counter.vcd"));
                 assert!(app.error.is_none());
+                let session = app.session.as_mut().unwrap();
+                for index in session.selected.clone() {
+                    session.set_bus_expanded(index, true);
+                }
                 for frame in 0..60 {
                     let session = app.session.as_mut().unwrap();
                     session.hierarchy_query =
