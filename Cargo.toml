@@ -1,0 +1,23 @@
+[package]
+name = "oculi"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Explore completed digital simulation traces"
+default-run = "oculi"
+
+[features]
+default = []
+gui = ["dep:eframe", "dep:egui_extras", "dep:rfd"]
+
+[dependencies]
+vcd = "0.7.0"
+eframe = { version = "0.37", optional = true, default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
+egui_extras = { version = "0.37", optional = true, default-features = false, features = ["svg"] }
+rfd = { version = "0.18", optional = true }
+
+[[bin]]
+name = "oculi-gui"
+path = "src/bin/oculi-gui.rs"
+required-features = ["gui"]
+

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 24" fill="none" role="img" aria-labelledby="title">
+  <title id="title">Oculi eye mark</title>
+  <ellipse cx="16" cy="12" rx="14" ry="9" stroke="#74d8a6" stroke-width="1.8"/>
+  <circle cx="16" cy="12" r="3.6" fill="#74d8a6"/>
+</svg>

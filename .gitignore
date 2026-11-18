@@ -1,0 +1,5 @@
+/target/
+/build/
+# Disposable browser mockups and their local preview-server state.
+/.superpowers/
+
