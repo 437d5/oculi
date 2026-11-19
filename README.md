@@ -3,8 +3,117 @@
 A Rust waveform exploration project, built while learning Rust. Explore completed
 digital simulations in a native waveform viewer or print a command-line summary.
 
-See the [waveform feature roadmap](docs/ROADMAP.md) for proposed next steps and a
-worksheet for choosing the workflows you want from your existing tools.
+See the [roadmap](#roadmap) for planned waveform workflows and proposed milestones.
+
+## Roadmap
+
+This roadmap records the requested features. The milestone order is proposed;
+it is not a release schedule. Unchecked items are planned, not implemented.
+Interaction details will be agreed before implementing each feature.
+
+Current foundation:
+
+- [x] Digital VCD loading with hierarchy, aliases, and four-state values (0/1/X/Z).
+- [x] Scope/signal search, waveform reordering, and expandable bus bits.
+- [x] Multiple cursors with stable names/colors, active-cursor values, and zoom/pan.
+
+### 1. Navigate and measure
+
+- [ ] **Drag to zoom into a time window.** Select an interval directly in the
+  waveform area and fit the viewport to it. Choose a gesture that works alongside
+  the existing drag-to-pan and click-to-place-cursor controls.
+- [ ] **Measure the time difference between cursors.** Show the elapsed time
+  between two cursors in the trace's declared time units, or integer ticks when
+  no timescale is declared. Proposed first version: two selectors choose the pair
+  when several cursors exist, and a live readout shows `Δt = |t₂ - t₁|` as either
+  cursor moves. Dragging markers, exact-time entry, and edge snapping can be
+  considered later if needed.
+- [ ] **Count signal edges between cursors.** Choose a signal and two cursors,
+  then count edges within their interval. Define rising/falling edge options,
+  endpoint inclusion, equal-time changes, and X/Z handling before implementation.
+
+Cursor-pair selection should be shared by interval measurements and edge counting.
+
+### 2. Select and organize signals
+
+- [ ] **Select multiple signals and act on them together.** Support selecting
+  several rows and applying bulk actions. Candidate actions include adding,
+  removing, reordering, and changing display settings; browser selection and
+  displayed-row selection need explicit behavior.
+- [ ] **Change signal colors.** Choose colors for displayed signals, including
+  selected rows together. Define how bus bits inherit or override a bus color.
+- [ ] **Signal groups and group interaction.** Organize rows into named groups.
+  Proposed actions include creating/renaming groups, expanding/collapsing them,
+  moving groups, and adding/removing members. Reuse multiple-selection behavior.
+
+Keep display choices separate from trace storage so aliases can be styled and
+organized independently while continuing to share waveform data.
+
+### 3. Save and reuse a debugging view
+
+- [ ] **Save and restore sessions.** Retain the trace reference, signal order,
+  expanded bus bits, groups, colors, cursors and measurement pair, viewport, and
+  display settings. Identify signals by hierarchical path and compatible width
+  rather than runtime indices, preserving distinct alias names. Use a versioned
+  session format and resolve relative trace paths from the session file.
+- [ ] **Reload an updated VCD.** Refresh a trace after rerunning the simulation
+  while retaining compatible rows and display settings. Report missing or
+  incompatible signals and clamp times if the new trace is shorter. Failed
+  reloads preserve the current view; failed saves preserve an existing session.
+
+### 4. Navigate events and find values
+
+- [ ] **Next/previous transition navigation.** Move the active cursor to the
+  next or previous change on a selected signal, with rising/falling edge options
+  for scalar signals. Share edge definitions with edge counting, including X/Z,
+  equal-time changes, and behavior at the first/last event.
+
+- [ ] **Find a value on a waveform.** Search a selected signal and navigate to
+  matching times. Define forward/backward search, value entry formats, and
+  whether X/Z are literal values or wildcards.
+
+### 5. Keep larger traces responsive
+
+- [ ] **Measure representative traces.** Record file size, signal/change counts,
+  load time, peak memory, and navigation latency. Include dense clocks, wide
+  buses, deep hierarchy, and long quiet intervals. Start measuring early and use
+  the results to prioritize performance work.
+- [ ] **Background loading with progress and cancellation.** Keep the window
+  responsive and install a replacement trace only after loading succeeds.
+- [ ] **Improve storage and rendering where measurements justify it.** Reduce
+  memory use and avoid unnecessary per-frame work while preserving exact values,
+  timestamps, and visible activity from narrow pulses.
+
+Establish a memory and responsiveness baseline before opening several full traces.
+
+### 6. Evaluate expressions and explore multiple traces
+
+- [ ] **Advanced: evaluate expressions involving signals.** Define supported
+  operators, width/signedness rules, four-state behavior, and how results appear
+  before building an evaluator. Start with expressions within one trace.
+- [ ] **Several VCD tabs.** Consider opening multiple traces in separate tabs,
+  each retaining its own selected signals, groups, colors, cursors, and viewport.
+  Measure memory use before committing to this feature: each trace is currently
+  loaded completely into memory. Cross-trace comparison is a separate decision.
+
+Value search provides a smaller first step before expression evaluation.
+
+### Longer-term ideas
+
+Candidates to revisit after using the earlier milestones on real debugging tasks;
+these are not committed milestones:
+
+- **FST support**, if the simulations produce it. Evaluate a format adapter
+  together with the storage measurements; changing file formats alone does not
+  solve memory use if every sample is expanded on load.
+- **Waveform image export** for sharing selected rows and a time interval.
+- **Compare simulation runs** after independent tabs work well, with explicit
+  time alignment and handling of different timescales or missing signals.
+- **Protocol decoding**, such as UART or SPI, when a concrete debugging task
+  justifies it.
+
+First proposed increment: drag-to-zoom, followed by the agreed cursor interactions
+and edge counting. Feature priorities can be changed after trying each increment.
 
 ## Native waveform viewer
 
