@@ -33,10 +33,16 @@ scope (`ct` finds `count[3:0]`). Use ↑/↓ to highlight a signal and Enter to 
 its waveform, or use its checkbox. **Clear** or Escape restores the scope's full
 signal list without removing displayed waveforms. The two searches are independent.
 
-- Click a waveform to place cursor A and inspect values.
+- Click a waveform to place the first cursor or move the active cursor.
+  **Ctrl+click** creates a new cursor at that point. **Add cursor** creates another
+  at the active visible cursor's time, or the viewport centre if none is visible;
+  click the waveform to position it. Use the **Cursor A/B/…** selector to switch
+  the active cursor and **Remove cursor** to remove it. Names and colors stay
+  stable, and all visible cursors are drawn with ruler labels. The value column
+  shows the active cursor's values, including expanded bus bits.
 - Zoom in / Zoom out buttons navigate time. `+` (or `=`), `-`, and `F` zoom in,
   zoom out, and Fit trace when a text field is not focused. Buttons and shortcuts
-  zoom around the visible time cursor, or the centre of the viewport otherwise.
+  zoom around the active visible cursor, or the centre of the viewport otherwise.
   Scrolling over a waveform zooms around the mouse.
 - Drag a waveform horizontally to pan. Scroll over names to move through rows.
 - Drag the dotted handle beside a signal name onto another name row to reorder
@@ -146,7 +152,7 @@ trace model. Parser-library types stay inside the VCD adapter. Introduce traits
 when a second implementation needs a shared behavior; no plugin framework yet.
 
 For the GUI, start with `src/viewer/`: ordinary data and calculations with no GUI
-imports. `Session` owns a trace plus selection, scope, cursor, and viewport state.
+imports. `Session` owns a trace plus selection, scope, cursors, and viewport state.
 Then read `src/gui/mod.rs` and `browser.rs`: eframe calls an `App` implementation
 to describe the interface, and button responses tell us when to change state.
 Finally, `src/gui/waves.rs` maps integer ticks to screen coordinates and paints

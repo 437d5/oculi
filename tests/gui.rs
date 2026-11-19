@@ -36,7 +36,9 @@ fn failed_open_preserves_old_session_and_success_resets_it() {
     assert!(state.error.is_none());
     let session = state.session.as_mut().unwrap();
     session.selected.clear();
-    session.cursor = Some(10);
+    session.place_cursor(10);
+    session.add_cursor(15);
+    let cursors = session.cursors.clone();
     session.hierarchy_query = "dut".into();
     session.hierarchy_match = 1;
     session.filter = "ct".into();
@@ -44,13 +46,13 @@ fn failed_open_preserves_old_session_and_success_resets_it() {
     state.open(&root.join("Cargo.toml"));
     assert!(state.error.is_some());
     assert!(state.session.as_ref().unwrap().selected.is_empty());
-    assert_eq!(state.session.as_ref().unwrap().cursor, Some(10));
+    assert_eq!(state.session.as_ref().unwrap().cursors, cursors);
     assert_eq!(state.session.as_ref().unwrap().hierarchy_query, "dut");
     assert_eq!(state.session.as_ref().unwrap().filter, "ct");
     assert_eq!(state.session.as_ref().unwrap().signal_match, 1);
     state.open(&root.join("examples/counter.vcd"));
     assert!(state.error.is_none());
-    assert_eq!(state.session.as_ref().unwrap().cursor, None);
+    assert!(state.session.as_ref().unwrap().cursors.all().is_empty());
     assert!(!state.session.as_ref().unwrap().selected.is_empty());
     assert!(state.session.as_ref().unwrap().hierarchy_query.is_empty());
     assert_eq!(state.session.as_ref().unwrap().hierarchy_match, 0);

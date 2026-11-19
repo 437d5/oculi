@@ -48,9 +48,9 @@ fn selection_shares_histories_and_filters_by_scope() {
     s.set_selected(0, false);
     assert_eq!(s.selected, [2, 3]);
     assert_eq!(s.trace.histories.len(), 2);
-    s.cursor = Some(12);
+    s.place_cursor(12);
     let reset = Session::new(sample());
-    assert_eq!(reset.cursor, None);
+    assert!(reset.cursors.all().is_empty());
     assert!(reset.filter.is_empty());
     assert_eq!(reset.viewport, Viewport::fit(100));
 }

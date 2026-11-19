@@ -3,6 +3,7 @@ use crate::{
     trace::Logic,
     viewer::{
         Session,
+        cursors::CursorId,
         format::{format_time, format_value},
         segments,
     },
@@ -56,8 +57,31 @@ impl Colors {
     }
 }
 
+pub(super) fn cursor_color(id: CursorId, dark: bool) -> Color32 {
+    let palette = if dark {
+        [
+            [233, 191, 113],
+            [122, 188, 255],
+            [238, 155, 218],
+            [160, 171, 255],
+            [243, 157, 101],
+            [86, 205, 221],
+        ]
+    } else {
+        [
+            [137, 92, 11],
+            [25, 90, 160],
+            [164, 32, 88],
+            [102, 62, 179],
+            [168, 69, 14],
+            [0, 116, 127],
+        ]
+    };
+    let [r, g, b] = palette[(id.0 % palette.len() as u64) as usize];
+    Color32::from_rgb(r, g, b)
+}
+
 pub fn show(ui: &mut egui::Ui, session: &mut Session) {
-    let colors = Colors::new(ui);
     let names_width = (ui.available_width() * 0.30).clamp(160.0, 250.0);
     let available = ui.available_rect_before_wrap();
     let navigation_area =
@@ -65,6 +89,23 @@ pub fn show(ui: &mut egui::Ui, session: &mut Session) {
     // Apply input once before drawing the ruler or any rows. All geometry in
     // this frame then uses the same viewport and cursor.
     navigation(ui, session, navigation_area, "wave_workspace");
+    let active = session.cursors.active().copied();
+    let dark = ui.visuals().dark_mode;
+    let mut colors = Colors::new(ui);
+    if let Some(cursor) = active {
+        colors.cursor = cursor_color(cursor.id, dark);
+    }
+    let mut cursors: Vec<_> = session
+        .cursors
+        .all()
+        .iter()
+        .copied()
+        .filter(|cursor| {
+            cursor.time >= session.viewport.start && cursor.time <= session.viewport.end
+        })
+        .collect();
+    // Keep the active marker visible when cursors occupy the same timestamp.
+    cursors.sort_by_key(|cursor| Some(cursor.id) == active.map(|cursor| cursor.id));
     let (header, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 42.0), Sense::hover());
     let timeline = Rect::from_min_max(
@@ -82,7 +123,9 @@ pub fn show(ui: &mut egui::Ui, session: &mut Session) {
     painter.text(
         Pos2::new(timeline.left() - 12.0, header.center().y),
         Align2::RIGHT_CENTER,
-        "Value at A",
+        active
+            .map(|cursor| format!("Value at {}", cursor.id.name()))
+            .unwrap_or_else(|| "Value".into()),
         FontId::proportional(11.0),
         colors.muted,
     );
@@ -112,11 +155,37 @@ pub fn show(ui: &mut egui::Ui, session: &mut Session) {
             continue;
         }
         painter.galley(
-            Pos2::new(left, header.center().y - galley.size().y / 2.0),
+            Pos2::new(left, header.center().y - 6.0 - galley.size().y / 2.0),
             galley,
             colors.muted,
         );
         label_right = left + width;
+    }
+    let marker_painter = painter.with_clip_rect(timeline);
+    for cursor in &cursors {
+        let x =
+            timeline.left() + timeline.width() * session.viewport.fraction_at(cursor.time) as f32;
+        let color = cursor_color(cursor.id, dark);
+        let galley =
+            marker_painter.layout_no_wrap(cursor.id.name(), FontId::monospace(11.0), color);
+        let left = (x + 3.0).clamp(
+            timeline.left(),
+            (timeline.right() - galley.size().x).max(timeline.left()),
+        );
+        let label_pos = Pos2::new(left, header.bottom() - 4.0 - galley.size().y);
+        marker_painter.rect_filled(
+            Rect::from_min_size(label_pos, galley.size()).expand2(egui::vec2(2.0, 0.0)),
+            2.0,
+            ui.visuals().panel_fill,
+        );
+        marker_painter.galley(label_pos, galley, color);
+        marker_painter.line_segment(
+            [
+                Pos2::new(x, header.bottom() - 3.0),
+                Pos2::new(x, header.bottom()),
+            ],
+            Stroke::new(1.5, color),
+        );
     }
     if session.selected.is_empty() {
         ui.add_space(35.0);
@@ -301,7 +370,9 @@ pub fn show(ui: &mut egui::Ui, session: &mut Session) {
                         }
                     }
                     let value = session
-                        .cursor
+                        .cursors
+                        .active()
+                        .map(|cursor| cursor.time)
                         .and_then(|time| history.value_at(time))
                         .and_then(|value| wave.project(value));
                     let full = value
@@ -395,15 +466,19 @@ pub fn show(ui: &mut egui::Ui, session: &mut Session) {
                             colors.muted,
                         );
                     }
-                    if let Some(time) = session.cursor
-                        && time >= session.viewport.start
-                        && time <= session.viewport.end
-                    {
-                        let x =
-                            area.left() + area.width() * session.viewport.fraction_at(time) as f32;
+                    for cursor in &cursors {
+                        let x = area.left()
+                            + area.width() * session.viewport.fraction_at(cursor.time) as f32;
                         canvas.line_segment(
                             [Pos2::new(x, area.top()), Pos2::new(x, area.bottom())],
-                            Stroke::new(1.0, colors.cursor),
+                            Stroke::new(
+                                if Some(cursor.id) == active.map(|cursor| cursor.id) {
+                                    1.5
+                                } else {
+                                    1.0
+                                },
+                                cursor_color(cursor.id, dark),
+                            ),
                         );
                     }
                 }
@@ -442,12 +517,15 @@ fn navigation(
     if response.clicked()
         && let Some(pos) = response.interact_pointer_pos()
     {
-        session.cursor = Some(
-            session
-                .viewport
-                .tick_at(f64::from((pos.x - area.left()) / area.width()))
-                .min(session.trace.end_time),
-        );
+        let time = session
+            .viewport
+            .tick_at(f64::from((pos.x - area.left()) / area.width()))
+            .min(session.trace.end_time);
+        if ui.input(|input| input.modifiers.ctrl) {
+            session.add_cursor(time);
+        } else {
+            session.place_cursor(time);
+        }
     }
     if response.dragged() {
         let origin_id = response.id.with("drag_origin");
@@ -560,13 +638,171 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ctrl_click_creates_cursors_and_normal_click_or_drag_preserves_the_others() {
+        let context = egui::Context::default();
+        super::super::configure_context(&context);
+        let mut session = Session::new(
+            crate::vcd::load(&include_bytes!("../../examples/counter.vcd")[..]).unwrap(),
+        );
+        frame(&context, &mut session, vec![]);
+        let click = |session: &mut Session, x, modifiers| {
+            let point = Pos2::new(x, 75.0);
+            for pressed in [true, false] {
+                frame(
+                    &context,
+                    session,
+                    vec![
+                        egui::Event::ModifiersChanged(modifiers),
+                        egui::Event::PointerMoved(point),
+                        egui::Event::PointerButton {
+                            pos: point,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers,
+                        },
+                    ],
+                );
+            }
+        };
+        click(&mut session, 456.0, egui::Modifiers::NONE);
+        click(&mut session, 868.0, egui::Modifiers::CTRL);
+        click(&mut session, 1074.0, egui::Modifiers::CTRL);
+        assert_eq!(
+            session
+                .cursors
+                .all()
+                .iter()
+                .map(|cursor| cursor.time)
+                .collect::<Vec<_>>(),
+            [5, 15, 20]
+        );
+        assert_eq!(session.cursors.active().unwrap().id.name(), "C");
+        click(&mut session, 662.0, egui::Modifiers::NONE);
+        assert_eq!(
+            session
+                .cursors
+                .all()
+                .iter()
+                .map(|cursor| cursor.time)
+                .collect::<Vec<_>>(),
+            [5, 15, 10]
+        );
+        let b = session.cursors.all()[1].id;
+        session.cursors.select(b);
+        click(&mut session, 456.0, egui::Modifiers::NONE);
+        assert_eq!(
+            session
+                .cursors
+                .all()
+                .iter()
+                .map(|cursor| cursor.time)
+                .collect::<Vec<_>>(),
+            [5, 5, 10]
+        );
+        session.viewport = crate::viewer::viewport::Viewport { start: 5, end: 15 };
+        let before = session.cursors.clone();
+        let from = Pos2::new(700.0, 75.0);
+        let to = Pos2::new(906.0, 75.0);
+        frame(
+            &context,
+            &mut session,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::CTRL),
+                egui::Event::PointerMoved(from),
+                egui::Event::PointerButton {
+                    pos: from,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::CTRL,
+                },
+            ],
+        );
+        frame(&context, &mut session, vec![egui::Event::PointerMoved(to)]);
+        frame(
+            &context,
+            &mut session,
+            vec![egui::Event::PointerButton {
+                pos: to,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::CTRL,
+            }],
+        );
+        assert_eq!(
+            session.cursors, before,
+            "Ctrl+drag must not create or move cursors"
+        );
+        assert_eq!(session.viewport.start, 3);
+    }
+
+    #[test]
+    fn all_cursor_markers_render_and_bus_bit_values_follow_the_active_cursor() {
+        let context = egui::Context::default();
+        super::super::configure_context(&context);
+        let trace = crate::vcd::load(
+            &b"$var wire 2 ! data [1:0] $end\n$enddefinitions $end\nb01 !\n#10\nb10 !\n#20\n"[..],
+        )
+        .unwrap();
+        let mut session = Session::new(trace);
+        session.set_bus_expanded(0, true);
+        let a = session.add_cursor(0);
+        let b = session.add_cursor(10);
+        for (active, expected) in [(a, ["01", "0", "1"]), (b, ["10", "1", "0"])] {
+            session.cursors.select(active);
+            let mut color = Color32::TRANSPARENT;
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280.0, 800.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    color = cursor_color(active, ui.visuals().dark_mode);
+                    show(ui, &mut session);
+                },
+            );
+            let values: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text)
+                        if text.fallback_color == color && text.pos.y > 42.0 =>
+                    {
+                        Some(text.galley.text())
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(values, expected);
+            for id in [a, b] {
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Text(text) if text.galley.text() == id.name()
+                )));
+                let marker_color = cursor_color(id, context.global_style().visuals.dark_mode);
+                let lines = output.shapes.iter().filter(|shape| matches!(&shape.shape,
+                    egui::Shape::LineSegment { points, stroke }
+                        if stroke.color == marker_color && (points[1].y - points[0].y).abs() > 30.0
+                )).count();
+                assert_eq!(lines, 3, "each cursor must span the bus and both bit rows");
+            }
+            output.textures_delta.clear();
+        }
+        session.viewport = crate::viewer::viewport::Viewport { start: 0, end: 5 };
+        let labels = frame(&context, &mut session, vec![]);
+        assert!(
+            !labels.contains(&"B".into()),
+            "off-screen cursors must not draw a misleading visible marker"
+        );
+        assert_eq!(session.cursors.active().unwrap().time, 10);
+    }
+
+    #[test]
     fn bus_toggle_expands_scalar_bit_rows_and_collapses_without_changing_selection() {
         let context = egui::Context::default();
         super::super::configure_context(&context);
         let mut session = Session::new(
             crate::vcd::load(&include_bytes!("../../examples/counter.vcd")[..]).unwrap(),
         );
-        session.cursor = Some(15);
+        session.place_cursor(15);
         let selected = session.selected.clone();
         let viewport = session.viewport;
         let histories = session.trace.histories.len();
@@ -614,7 +850,7 @@ mod tests {
         assert!(!labels.contains(&"tb.count[3]".into()));
         assert_eq!(session.selected, selected);
         assert_eq!(session.viewport, viewport);
-        assert_eq!(session.cursor, Some(15));
+        assert_eq!(session.cursors.active().map(|cursor| cursor.time), Some(15));
         assert_eq!(session.trace.histories.len(), histories);
     }
 
@@ -629,7 +865,7 @@ mod tests {
         .unwrap();
         let mut session = Session::new(trace);
         session.set_bus_expanded(0, true);
-        session.cursor = Some(5);
+        session.place_cursor(5);
         let mut wave_color = Color32::TRANSPARENT;
         let mut cursor_color = Color32::TRANSPARENT;
         let mut output = context.run_ui(
@@ -648,7 +884,9 @@ mod tests {
             .shapes
             .iter()
             .filter_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) if text.fallback_color == cursor_color => {
+                egui::Shape::Text(text)
+                    if text.fallback_color == cursor_color && text.pos.y > 42.0 =>
+                {
                     Some(text.galley.text())
                 }
                 _ => None,
@@ -997,10 +1235,10 @@ mod tests {
         );
         frame(&context, &mut session, vec![button(point, false)]);
         assert!(
-            session.cursor.is_some(),
+            session.cursors.active().is_some(),
             "bus hover tooltip must not intercept clicks"
         );
-        let cursor = session.cursor;
+        let cursors = session.cursors.clone();
         let end = session.trace.end_time;
         session.viewport.zoom(0.5, 12, end);
         let before = session.viewport;
@@ -1012,7 +1250,7 @@ mod tests {
             vec![egui::Event::PointerMoved(moved)],
         );
         frame(&context, &mut session, vec![button(moved, false)]);
-        assert_eq!(session.cursor, cursor, "drag must preserve cursor");
+        assert_eq!(session.cursors, cursors, "drag must preserve cursors");
         assert_ne!(session.viewport, before, "drag should pan a zoomed trace");
     }
 

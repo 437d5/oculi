@@ -1,4 +1,5 @@
 //! Viewing state shared by the UI and its display-independent tests.
+pub mod cursors;
 pub mod format;
 pub mod hierarchy;
 pub mod rows;
@@ -19,7 +20,7 @@ pub struct Session {
     pub signal_match: usize,
     pub hierarchy_query: String,
     pub hierarchy_match: usize,
-    pub cursor: Option<u64>,
+    pub cursors: cursors::Cursors,
     pub viewport: Viewport,
     pub radix: Radix,
     expanded_buses: std::collections::HashSet<usize>,
@@ -68,7 +69,7 @@ impl Session {
             signal_match: 0,
             hierarchy_query: String::new(),
             hierarchy_match: 0,
-            cursor: None,
+            cursors: cursors::Cursors::default(),
             viewport,
             radix: Radix::Binary,
             expanded_buses: std::collections::HashSet::new(),
@@ -86,6 +87,14 @@ impl Session {
             self.selected.retain(|&i| i != index);
             self.expanded_buses.remove(&index);
         }
+    }
+
+    pub fn add_cursor(&mut self, time: u64) -> cursors::CursorId {
+        self.cursors.add(time.min(self.trace.end_time))
+    }
+
+    pub fn place_cursor(&mut self, time: u64) -> cursors::CursorId {
+        self.cursors.place(time.min(self.trace.end_time))
     }
 
     pub fn is_bus_expanded(&self, index: usize) -> bool {

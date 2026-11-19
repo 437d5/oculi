@@ -561,7 +561,7 @@ $enddefinitions $end
             crate::vcd::load(&include_bytes!("../../examples/counter.vcd")[..]).unwrap(),
         );
         session.filter = "count".into();
-        session.cursor = Some(10);
+        session.place_cursor(10);
         let selected = session.selected.clone();
         let viewport = session.viewport;
         let ctx = egui::Context::default();
@@ -607,7 +607,7 @@ $enddefinitions $end
         assert_eq!(session.scope, ["tb", "dut"]);
         assert!(session.filter.is_empty());
         assert_eq!(session.selected, selected);
-        assert_eq!(session.cursor, Some(10));
+        assert_eq!(session.cursors.active().map(|cursor| cursor.time), Some(10));
         assert_eq!(session.viewport, viewport);
     }
 
